@@ -1,7 +1,8 @@
 import { bus } from "./core/bus";
-import { startCamera, cameraStream, disableCamera } from "./gesture/camera";
+import { startCamera, disableCamera } from "./gesture/camera";
 import { startTracking } from "./gesture/tracker";
 import { startRenderer } from "./gesture/renderer";
+import { startRecording, stopRecording } from "./gesture/recorder";
 
 const video = document.querySelector<HTMLVideoElement>("#camera-stream")!;
 const canvas = document.querySelector<HTMLCanvasElement>("#stage")!;
@@ -14,11 +15,6 @@ bus.on("camera:ready", () => {
   startTracking(video).catch((error) => console.error("Tracker failed:", error));
 });
 
-let stream = await cameraStream();
-const [track] = stream.getVideoTracks();
-console.log(track.getSettings());      // real width, height, frameRate
-console.log(track.getCapabilities());  // what this camera can do
-
 startCamera(video).catch((error) => {
   console.error("Error accessing the camera:", error);
   alert("Could not access camera. Ensure you have granted permission");
@@ -28,6 +24,9 @@ startCamera(video).catch((error) => {
 app.innerHTML = `
   <button id="camera-toggle">
     Toggle camera
+  </button>
+  <button id="recording-toggle">
+    Record
   </button>
 `
 
@@ -48,3 +47,4 @@ function toggleCamera() {
 
 const disableCameraBtn = document.querySelector<HTMLButtonElement>("#camera-toggle");
 disableCameraBtn?.addEventListener("click", toggleCamera);
+
