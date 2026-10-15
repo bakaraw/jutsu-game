@@ -3,6 +3,7 @@ import cv2
 import mediapipe as mp
 import time
 import tkinter as tk
+import pandas as pd
 from PIL import Image, ImageTk
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -14,6 +15,8 @@ ARGS = None
 APP = None
 
 CONNECTIONS = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
+extracted_landmarks = []
+app = tk.Tk()
 
 
 def main():
@@ -50,7 +53,6 @@ def main():
     vid.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
     vid.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
 
-    app = tk.Tk()
     app.bind("<Escape>", lambda e: app.quit())
     label_widget = tk.Label(app)
     label_widget.pack()
@@ -61,12 +63,9 @@ def main():
         num_hands=2,
     )
 
-    landmarker = vision.HandLandmarker.create_from_options(
-        options
-    )  # <-- you were missing this
-
+    landmarker = vision.HandLandmarker.create_from_options(options)
     read_vid(vid, label_widget, landmarker, output_path)
-
+    save_landmarks(output_path)
     app.mainloop()
     vid.release()
 
@@ -80,11 +79,14 @@ def read_vid(vid, label_widget, landmarker, output_path):
     global counter
     ok, frame = vid.read()
     if not ok:
-        return  # or loop / quit
+        save_landmarks(output_path)
+        app.quit()
+        return
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
     ts = int(vid.get(cv2.CAP_PROP_POS_MSEC))
     result = landmarker.detect_for_video(mp_image, ts)
+    extracted_landmarks.append(result)
     draw_hands(frame, result)
 
     image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -95,6 +97,12 @@ def read_vid(vid, label_widget, landmarker, output_path):
     label_widget.photo_image = photo
     label_widget.configure(image=photo)
     label_widget.after(10, read_vid, vid, label_widget, landmarker, output_path)
+
+
+def save_landmarks(filename: Path):
+    df = pd.DataFrame(extracted_landmarks)
+    df.to_csv(f"{filename.resolve()}/landmarking.csv", index=False)
+    print(len(extracted_landmarks))
 
 
 def draw_hands(frame_bgr, result):
