@@ -2,8 +2,8 @@ import argparse
 import cv2
 import mediapipe as mp
 import time
-import tkinter as tk
 import pandas as pd
+import numpy as np
 from PIL import Image, ImageTk
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -16,7 +16,10 @@ APP = None
 
 CONNECTIONS = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
 extracted_landmarks = []
-app = tk.Tk()
+
+cols = ["frame", "ts", "hand", "handedness"] + [
+    f"{axis}{i}" for i in range(21) for axis in "xyz"
+]
 
 
 def main():
@@ -43,6 +46,8 @@ def main():
 
     if ARGS.output:
         output_path = Path(ARGS.output).resolve()
+        if not output_path.exists():
+            output_path.mkdir()
         assert output_path.exists(), f"Output directory not found: {ARGS.output}"
         print(f"output: {ARGS.output}")
     else:
@@ -50,12 +55,10 @@ def main():
         print(f"Default output directory: {output_path}")
 
     vid = cv2.VideoCapture(file_path)
+    assert vid.isOpened(), "Could not open video"
+    fps = vid.get(cv2.CAP_PROP_FPS) or 30
     vid.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
     vid.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
-
-    app.bind("<Escape>", lambda e: app.quit())
-    label_widget = tk.Label(app)
-    label_widget.pack()
 
     options = vision.HandLandmarkerOptions(
         base_options=python.BaseOptions(model_asset_path=str(model_path)),
@@ -64,55 +67,35 @@ def main():
     )
 
     landmarker = vision.HandLandmarker.create_from_options(options)
-    read_vid(vid, label_widget, landmarker, output_path)
-    save_landmarks(output_path)
-    app.mainloop()
+    rows = []
+    frame_idx = 0
+    while True:
+        ok, frame = vid.read()
+        if not ok:
+            break
+        h, w = frame.shape[:2]
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        ts = int(frame_idx * 1000 / fps)  # strictly increasing
+        result = landmarker.detect_for_video(mp_image, ts)
+
+        for hand_idx, hand in enumerate(result.hand_landmarks):
+            handedness = result.handedness[hand_idx][0].category_name
+            pts = np.array([[lm.x * w, lm.y * h, lm.z * w] for lm in hand])
+
+            pts -= pts[0]
+            scale = np.linalg.norm(pts[9])
+
+            if scale > 0:
+                pts /= scale
+
+            rows.append((frame_idx, ts, hand_idx, handedness, *pts.flatten()))
+        frame_idx += 1
     vid.release()
-
-
-start = time.monotonic()
-last_ts = -1
-counter = 0
-
-
-def read_vid(vid, label_widget, landmarker, output_path):
-    global counter
-    ok, frame = vid.read()
-    if not ok:
-        save_landmarks(output_path)
-        app.quit()
-        return
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    ts = int(vid.get(cv2.CAP_PROP_POS_MSEC))
-    result = landmarker.detect_for_video(mp_image, ts)
-    extracted_landmarks.append(result)
-    draw_hands(frame, result)
-
-    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    if output_path:
-        image.save(f"{output_path}/{counter}.jpeg", format="JPEG", quality=80)
-    counter += 1
-    photo = ImageTk.PhotoImage(image)
-    label_widget.photo_image = photo
-    label_widget.configure(image=photo)
-    label_widget.after(10, read_vid, vid, label_widget, landmarker, output_path)
-
-
-def save_landmarks(filename: Path):
-    df = pd.DataFrame(extracted_landmarks)
-    df.to_csv(f"{filename.resolve()}/landmarking.csv", index=False)
-    print(len(extracted_landmarks))
-
-
-def draw_hands(frame_bgr, result):
-    h, w = frame_bgr.shape[:2]
-    for hand in result.hand_landmarks:  # one list of 21 landmarks per hand
-        pts = [(int(lm.x * w), int(lm.y * h)) for lm in hand]  # x,y are normalized 0-1
-        for c in CONNECTIONS:
-            cv2.line(frame_bgr, pts[c.start], pts[c.end], (0, 255, 0), 2)
-        for p in pts:
-            cv2.circle(frame_bgr, p, 4, (0, 0, 255), -1)
+    df = pd.DataFrame(rows, columns=cols)
+    out = output_path / "landmarking.csv"
+    df.to_csv(out, index=False)
+    print(f"{frame_idx} frames, {len(df)} rows -> {out}")
 
 
 if __name__ == "__main__":
