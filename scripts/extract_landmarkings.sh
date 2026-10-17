@@ -9,6 +9,14 @@ fi
 
 eval "$(conda shell.bash hook)"
 
+if ! conda env list | grep -q "^backend "; then
+    echo "Creating backend environment..."
+
+    conda create -n backend python=3.10 -y
+
+    conda run -n backend pip install mediapipe opencv-python
+fi
+
 conda activate backend
 
 hand_signs=(
@@ -28,5 +36,5 @@ hand_signs=(
 
 for item in "${hand_signs[@]}"; do
   echo "$item"
-  python extract_hand_landmark.py ../shared/models/hand_landmarker.task ~/Videos/$item.mp4 -o ~/Videos/$item
+  python extract_hand_landmark.py ~/Videos/$item.mp4 -o ~/Videos/$item -m ../shared/models/hand_landmarker.task
 done
